@@ -2,10 +2,11 @@
  * 导出：下单汇总表 / 量体明细 / 特殊体型清单 / 备货建议。
  * 页面预览、CSV、XLSX 与打印预览共用同一份数据，保证逐行一致。
  */
-import type { Gender, Person, Project, SizeRule, SummaryRow } from './types'
+import type { Gender, Person, Project, SizeRule, SummaryRow, TrialRecord, TrialScheme } from './types'
 import { specialFlagLabel } from './sizeRules'
 import { conservationText, type Summary } from './merge'
 import { chestWaistDiffCm, formatCm } from './precision'
+import { BOUNDARY_TEXT } from './trial'
 import type { Sheet } from './xlsx'
 
 export type BaseContext = {
@@ -17,6 +18,8 @@ export type ExportContext = BaseContext & {
   summary: Summary
   operator: string
   generatedAt: Date
+  /** 排产所采纳的试算方案（参数与当前规则一致时才传），下单表元信息里留档位依据 */
+  adoptedTrial?: TrialScheme | null
 }
 
 export function genderLabel(gender: Gender): string {
@@ -87,6 +90,14 @@ export function buildOrderSheet(ctx: ExportContext): OrderSheet {
     meta: [
       { label: '项目名称', value: project.name },
       { label: '号型规则版本', value: `${rule.version}（${rule.label}）` },
+      ...(ctx.adoptedTrial
+        ? [
+            {
+              label: '档位方案依据',
+              value: `试算采纳：身高步长 ${ctx.adoptedTrial.params.heightStepCm}cm / 起点 ${ctx.adoptedTrial.params.heightAnchorCm}cm / 胸围步长 ${ctx.adoptedTrial.params.chestStepCm}cm / ${BOUNDARY_TEXT[ctx.adoptedTrial.params.boundaryRule]}，共 ${ctx.adoptedTrial.binCount} 个号型档`
+            }
+          ]
+        : []),
       { label: '生成时间', value: ctx.generatedAt.toLocaleString('zh-CN') },
       { label: '录入/导出人', value: ctx.operator || '—' },
       { label: '守恒校验', value: `${conservationText(summary)} → ${summary.conserved ? '通过' : '不通过'}` },
@@ -239,6 +250,91 @@ export function stockAdviceRows(ctx: ExportContext): (string | number)[][] {
   return rows
 }
 
+/* ------------------------------- 档位方案试算对照 ------------------------------- */
+
+export const TRIAL_HEADER = [
+  '排名',
+  '标记',
+  '身高步长(cm)',
+  '身高起点(cm)',
+  '胸围步长(cm)',
+  '边界规则',
+  '号型档数',
+  '特殊单列档数',
+  '最挤一档(人)',
+  '最空一档(人)',
+  '最挤-最空差(人)',
+  '常规备货(套)',
+  '特殊备货(套)',
+  '备货合计(套)',
+  '备货总价(元)',
+  '厂方档数上限',
+  '是否排得下',
+  '相对当前方案'
+]
+
+function schemeRow(record: TrialRecord, scheme: TrialScheme): (string | number)[] {
+  const mark = scheme.id === record.selectedSchemeId ? '已采纳' : scheme.rank === 1 ? '推荐' : scheme.isBaseline ? '当前' : ''
+  return [
+    scheme.rank ?? '超限',
+    mark,
+    scheme.params.heightStepCm,
+    scheme.params.heightAnchorCm,
+    scheme.params.chestStepCm,
+    BOUNDARY_TEXT[scheme.params.boundaryRule],
+    scheme.binCount,
+    scheme.specialBinCount,
+    scheme.maxQty,
+    scheme.minQty,
+    scheme.maxGap,
+    scheme.regularStock,
+    scheme.specialStock,
+    scheme.totalStock,
+    scheme.totalPrice,
+    record.config.maxBins,
+    scheme.feasible ? '排得下' : '超限',
+    scheme.verdict
+  ]
+}
+
+export function trialComparisonRows(record: TrialRecord): (string | number)[][] {
+  const rows: (string | number)[][] = [
+    ['档位方案试算对照表'],
+    [
+      `样本：总录入 ${record.totalRows} / 有效 ${record.validRows} 人；基础规则版本 ${record.baseRuleVersion}；单价 ${record.config.unitPrice} 元/套；口径：常规档 +5% 备货、特殊单列 +10% 备货，逐档向上取整且不少于 1 套`
+    ],
+    [
+      '取舍口径：两套都在档数上限内时，先比备货总价（省者优先），再比最挤/最空档差（均匀者优先），再比档数（少者优先）'
+    ],
+    [],
+    TRIAL_HEADER
+  ]
+  for (const scheme of record.schemes) rows.push(schemeRow(record, scheme))
+  return rows
+}
+
+export function trialDetailRows(record: TrialRecord): (string | number)[][] {
+  const rows: (string | number)[][] = [
+    ['档位方案试算 · 各档明细（与对照表同源）'],
+    [],
+    ['参数', '性别', '号型/标记', '类型', '人数', '建议备货(套)']
+  ]
+  for (const scheme of record.schemes) {
+    const mark = scheme.id === record.selectedSchemeId ? '【已采纳】' : scheme.rank === 1 ? '【推荐】' : ''
+    for (const bin of scheme.bins) {
+      rows.push([
+        `${mark}步长${scheme.params.heightStepCm}/起点${scheme.params.heightAnchorCm}/胸围${scheme.params.chestStepCm}/${BOUNDARY_TEXT[scheme.params.boundaryRule]}`,
+        genderLabel(bin.gender),
+        bin.isSpecial ? specialFlagLabel(record.baseRule, bin.sizeCode) : bin.sizeCode,
+        bin.isSpecial ? '特殊单列' : '常规档',
+        bin.qty,
+        bin.stock
+      ])
+    }
+  }
+  return rows
+}
+
 /* ------------------------------- 导出包装 ------------------------------- */
 
 export function orderWorkbookSheets(ctx: ExportContext): Sheet[] {
@@ -253,5 +349,12 @@ export function detailWorkbookSheets(ctx: BaseContext): Sheet[] {
   return [
     { name: '量体明细', rows: detailRows(ctx) },
     { name: '特殊体型清单', rows: specialRows(ctx) }
+  ]
+}
+
+export function trialWorkbookSheets(record: TrialRecord): Sheet[] {
+  return [
+    { name: '档位试算对照', rows: trialComparisonRows(record) },
+    { name: '各档明细', rows: trialDetailRows(record) }
   ]
 }

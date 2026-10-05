@@ -13,7 +13,7 @@ const rule = computed(() => getRule(project.value?.ruleVersion ?? store.rules[0]
 
 if (project.value) ensureMerged(project.value)
 
-const summary = computed(() => (project.value ? buildSummary(project.value, rule.value) : null))
+const summary = computed(() => (project.value ? buildSummary(project.value.persons, rule.value) : null))
 
 const expandedUnits = ref<string[]>([])
 const showAllRows = ref(false)

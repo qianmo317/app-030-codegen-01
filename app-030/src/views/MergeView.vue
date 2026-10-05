@@ -17,7 +17,7 @@ onMounted(() => {
   if (project.value) void flushProject(project.value)
 })
 
-const summary = computed(() => (project.value ? buildSummary(project.value, rule.value) : null))
+const summary = computed(() => (project.value ? buildSummary(project.value.persons, rule.value) : null))
 
 const search = ref('')
 const statusFilter = ref<'all' | 'active' | 'pending' | 'invalid' | 'duplicate' | 'overridden' | 'special'>('all')

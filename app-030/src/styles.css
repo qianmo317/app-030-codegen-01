@@ -327,6 +327,22 @@ p {
   color: var(--danger);
 }
 
+.checkbox-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-height: 34px;
+}
+
+.checkbox-row label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .input,
 .select,
 .textarea {

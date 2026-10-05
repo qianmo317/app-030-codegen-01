@@ -168,6 +168,7 @@ function formatTime(value: number): string {
                 <div class="toolbar">
                   <RouterLink class="btn btn-sm" :to="`/measure/${project.id}`">录入</RouterLink>
                   <RouterLink class="btn btn-sm" :to="`/import/${project.id}`">导入</RouterLink>
+                  <RouterLink class="btn btn-sm" :to="`/trial/${project.id}`">档位试算</RouterLink>
                   <RouterLink class="btn btn-sm" :to="`/merge/${project.id}`">归并</RouterLink>
                   <RouterLink class="btn btn-sm" :to="`/summary/${project.id}`">汇总</RouterLink>
                   <RouterLink class="btn btn-sm btn-primary" :to="`/export/${project.id}`">导出</RouterLink>
@@ -184,8 +185,9 @@ function formatTime(value: number): string {
       <div class="card-head"><h3>使用流程</h3></div>
       <div class="card-body tight">
         <p>① 在「号型规则」确认或新建规则版本（身高档位、胸腰差型别、边界规则）→ ② 新建项目并录入 / 导入量体数据 →
-          ③ 「归并结果」自动归并并可人工覆写 → ④ 「汇总与守恒」校验 <code>常规 + 特殊 = 有效人数</code> →
-          ⑤ 守恒通过后「导出下单表」（Excel / CSV / 打印成 PDF）。</p>
+          ③「档位试算」把身高步长 / 起点 / 胸围步长 / 边界规则各取几种值逐套试算，对照厂方档数上限选定方案并采纳进规则内核 →
+          ④「归并结果」自动归并并可人工覆写 → ⑤「汇总与守恒」校验 <code>常规 + 特殊 = 有效人数</code> →
+          ⑥ 守恒通过后「导出下单表」（Excel / CSV / 打印成 PDF）。</p>
         <p class="hint">
           隐私承诺：量体数据（姓名 + 身体尺寸）只保存在本机 IndexedDB，应用不发起任何网络请求，也没有后端与上传接口。
         </p>

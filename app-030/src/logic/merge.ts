@@ -158,8 +158,26 @@ function groupRows(rows: SummaryRow[]): SummaryRow[] {
   return [...rows].sort(compareRows)
 }
 
-/** 汇总 + 守恒校验。调用前请先 runMerge（结果幂等） */
-export function buildSummary(project: Project, rule: SizeRule): Summary {
+/** 建议备货加成口径（汇总、试算、导出共用同一份，不许各处自己算）：常规档 +5%，特殊单列 +10% */
+export const REGULAR_STOCK_MARGIN = 0.05
+export const SPECIAL_STOCK_MARGIN = 0.1
+
+export function stockSuggestion(qty: number, isSpecial: boolean): number {
+  return Math.max(1, Math.ceil(qty * (1 + (isSpecial ? SPECIAL_STOCK_MARGIN : REGULAR_STOCK_MARGIN))))
+}
+
+/**
+ * 汇总 + 守恒校验。调用前请先 runMerge（结果幂等）。
+ * 入参是人员数组而非整个项目：档位试算时传入按候选规则重算过的虚拟人员副本，
+ * 页面、归并、试算、导出因此共用同一份汇总代码，不会各处各算一遍。
+ */
+export function buildSummary(
+  persons: Person[],
+  rule: SizeRule,
+  opts?: { totalRows?: number; ruleVersion?: string }
+): Summary {
+  const totalRowsInput = opts?.totalRows ?? persons.length
+  const ruleVersion = opts?.ruleVersion ?? rule.version
   const regularMap = new Map<string, SummaryRow>()
   const specialMap = new Map<string, SummaryRow>()
   const orgMap = new Map<string, { persons: Person[]; rows: Map<string, SummaryRow> }>()
@@ -173,7 +191,7 @@ export function buildSummary(project: Project, rule: SizeRule): Summary {
   let specialPersonCount = 0
   const unmerged: SummaryDiff[] = []
 
-  for (const person of project.persons) {
+  for (const person of persons) {
     if (person.status === 'invalid') invalidRows += 1
     else if (person.status === 'duplicate') duplicateRows += 1
     else validRows += 1
@@ -262,7 +280,7 @@ export function buildSummary(project: Project, rule: SizeRule): Summary {
   const distribution: DistributionRow[] = [...allRows]
     .sort((a, b) => b.qty - a.qty || compareRows(a, b))
     .map((row) => {
-      const marginRatio = row.isSpecial ? 0.1 : 0.05
+      const marginRatio = row.isSpecial ? SPECIAL_STOCK_MARGIN : REGULAR_STOCK_MARGIN
       return {
         sizeCode: row.sizeCode,
         gender: row.gender,
@@ -270,17 +288,17 @@ export function buildSummary(project: Project, rule: SizeRule): Summary {
         isSpecial: row.isSpecial,
         ratio: accountedQty > 0 ? row.qty / accountedQty : 0,
         marginRatio,
-        suggestion: Math.max(1, Math.ceil(row.qty * (1 + marginRatio)))
+        suggestion: stockSuggestion(row.qty, row.isSpecial)
       }
     })
 
   return {
-    ruleVersion: rule.version,
+    ruleVersion,
     regularRows,
     specialRows,
     allRows,
     totals: {
-      totalRows: project.persons.length,
+      totalRows: totalRowsInput,
       invalidRows,
       duplicateRows,
       validRows,

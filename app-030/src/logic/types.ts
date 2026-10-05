@@ -119,3 +119,92 @@ export type Project = {
 }
 
 export type SummaryRow = { sizeCode: string; gender: Gender; qty: number; isSpecial: boolean }
+
+/* ------------------------------- 档位方案试算 ------------------------------- */
+
+/** 试算输入网格：四个维度各取几种值，引擎做笛卡尔积逐套计算 */
+export type TrialGridConfig = {
+  /** 身高步长候选（cm，0.5 的整数倍） */
+  heightStepsCm: number[]
+  /** 身高起点（锚点）候选 */
+  heightAnchorsCm: number[]
+  /** 胸围步长候选 */
+  chestStepsCm: number[]
+  /** 边界规则候选：边界归上 / 就近归下 */
+  boundaryRules: BoundaryRule[]
+}
+
+export type TrialConfig = TrialGridConfig & {
+  /** 工厂能接受的号型档数上限 */
+  maxBins: number
+  /** 每套单价（元），用于备货总价估算 */
+  unitPrice: number
+}
+
+export type TrialParams = {
+  heightStepCm: number
+  heightAnchorCm: number
+  chestStepCm: number
+  boundaryRule: BoundaryRule
+}
+
+export type TrialBinStat = {
+  sizeCode: string
+  gender: Gender
+  isSpecial: boolean
+  qty: number
+  /** 建议备货套数（与汇总/导出同一套加成口径） */
+  stock: number
+}
+
+export type TrialScheme = {
+  /** 参数指纹（半厘米整数拼接，避免小数比较） */
+  id: string
+  params: TrialParams
+  /** 是否为项目当前排产所用规则 */
+  isBaseline: boolean
+  /** 常规号型档数（与厂方上限比较的口径，特殊单列不计入） */
+  binCount: number
+  specialBinCount: number
+  peopleCount: number
+  specialPeople: number
+  maxQty: number
+  maxBinLabel: string
+  minQty: number
+  minBinLabel: string
+  /** 最挤一档与最空一档的人数差 */
+  maxGap: number
+  regularStock: number
+  specialStock: number
+  totalStock: number
+  totalPrice: number
+  /** 胸腰差等原因未归入常规档的人数（各套方案一致，仅提示） */
+  unmergedCount: number
+  /** 档数是否在厂方上限内 */
+  feasible: boolean
+  /** 可行方案内的推荐名次（1 = 推荐）；超限方案为 null */
+  rank: number | null
+  /** 相对当前排产方案的取舍结论（多几档换均匀还是省备货） */
+  verdict: string
+  bins: TrialBinStat[]
+  durationMs: number
+}
+
+export type TrialRecord = {
+  /** 一个项目只保留最近一次试算（含全部候选与选中结果） */
+  projectId: string
+  baseRuleVersion: string
+  /** 基础规则快照（试算当时的型别 / 特殊标记等，便于离线回显与导出） */
+  baseRule: SizeRule
+  totalRows: number
+  validRows: number
+  config: TrialConfig
+  /** 已按推荐口径排序 */
+  schemes: TrialScheme[]
+  recommendedSchemeId: string | null
+  selectedSchemeId: string | null
+  /** 采纳后写入规则内核的版本号 */
+  selectedRuleVersion: string | null
+  createdAt: number
+  updatedAt: number
+}

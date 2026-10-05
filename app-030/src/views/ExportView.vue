@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ensureMerged, flushProject, getProject, getRule, store } from '../logic/store'
 import { buildSummary, conservationText } from '../logic/merge'
@@ -13,11 +13,16 @@ import {
   personStatusLabel,
   specialRows,
   stockAdviceRows,
-  summaryRowLabel
+  summaryRowLabel,
+  trialComparisonRows,
+  trialWorkbookSheets
 } from '../logic/exporter'
 import { downloadBlob, downloadText, toCsvText } from '../logic/csv'
 import { buildXlsxBlob } from '../logic/xlsx'
 import { chestWaistDiffCm, formatCm } from '../logic/precision'
+import { loadTrial } from '../logic/trialStore'
+import { paramsText } from '../logic/trial'
+import type { TrialRecord } from '../logic/types'
 
 const route = useRoute()
 const project = computed(() => getProject(route.params.id as string))
@@ -25,7 +30,12 @@ const rule = computed(() => getRule(project.value?.ruleVersion ?? store.rules[0]
 
 if (project.value) ensureMerged(project.value)
 
-const summary = computed(() => (project.value ? buildSummary(project.value, rule.value) : null))
+const trialRecord = ref<TrialRecord | null>(null)
+onMounted(async () => {
+  if (project.value) trialRecord.value = await loadTrial(project.value.id)
+})
+
+const summary = computed(() => (project.value ? buildSummary(project.value.persons, rule.value) : null))
 const message = ref('')
 
 function context() {
@@ -37,7 +47,8 @@ function context() {
     rule: rule.value,
     summary: snapshot,
     operator: store.operator,
-    generatedAt: new Date()
+    generatedAt: new Date(),
+    adoptedTrial: trialSelected.value
   }
 }
 
@@ -110,6 +121,43 @@ async function exportStockCsv(): Promise<void> {
   const fileName = exportBaseName(ctx, '号型分布与备货建议', 'csv')
   downloadText(toCsvText(stockAdviceRows(ctx)), fileName)
   notify(`已导出号型分布与备货建议（CSV）→ ${fileName}`)
+}
+
+const trialSelected = computed(() => {
+  const snapshot = trialRecord.value
+  const current = project.value
+  if (!snapshot || !current) return null
+  const selected = snapshot.schemes.find((scheme) => scheme.id === snapshot.selectedSchemeId)
+  if (!selected) return null
+  // 是否真正写进规则内核：项目当前规则参数与选中方案一致（版本可能是 trial-x 或后续手改版）
+  const active = rule.value
+  const adopted =
+    active.heightStepCm === selected.params.heightStepCm &&
+    active.heightAnchor === selected.params.heightAnchorCm &&
+    active.chestStepCm === selected.params.chestStepCm &&
+    active.boundaryRule === selected.params.boundaryRule
+  return adopted ? selected : null
+})
+
+async function exportTrialCsv(): Promise<void> {
+  const snapshot = trialRecord.value
+  if (!snapshot || !(await prepare())) return
+  const ctx = context()
+  if (!ctx) return
+  const fileName = exportBaseName(ctx, '档位试算对照', 'csv')
+  downloadText(toCsvText(trialComparisonRows(snapshot)), fileName)
+  notify(`已导出档位试算对照表（CSV，${snapshot.schemes.length} 套方案）→ ${fileName}`)
+}
+
+async function exportTrialXlsx(): Promise<void> {
+  const snapshot = trialRecord.value
+  const current = project.value
+  if (!snapshot || !current || !(await prepare())) return
+  const ctx = context()
+  if (!ctx) return
+  const fileName = exportBaseName(ctx, '档位试算对照', 'xlsx')
+  downloadBlob(buildXlsxBlob(trialWorkbookSheets(snapshot)), fileName)
+  notify(`已导出档位试算对照表（Excel，${snapshot.schemes.length} 套方案）→ ${fileName}`)
 }
 
 async function printPreview(): Promise<void> {
@@ -200,6 +248,32 @@ const genderText = (gender: string): string => (gender === 'male' ? '男' : '女
         <p class="hint" style="margin-top: 8px">
           导出的下单汇总表与下方「与导出一致的明细」逐行相同；量体明细含号型结果与覆写留痕，可直接打印回贴给学校核对。
         </p>
+      </div>
+    </div>
+
+    <div v-if="trialRecord" class="card no-print">
+      <div class="card-head">
+        <h3>档位方案试算对照表导出</h3>
+        <div class="spacer"></div>
+        <span class="badge" :class="trialSelected ? 'badge-ok' : 'badge-warn'">
+          {{ trialSelected ? `排产用方案已采纳（${project?.ruleVersion}）` : '本项目尚未采纳试算方案' }}
+        </span>
+      </div>
+      <div class="card-body tight">
+        <p v-if="trialSelected" class="hint">
+          排产方案：{{ paramsText(trialSelected.params) }} —— {{ trialSelected.binCount }} 个号型档，
+          备货 {{ trialSelected.totalStock }} 套，总价 ¥{{ trialSelected.totalPrice }}；
+          下方下单表、归并页与本对照表按同一规则版本计算。
+        </p>
+        <p v-else class="hint">
+          本机留有 {{ trialRecord.schemes.length }} 套方案的试算留档（{{ new Date(trialRecord.updatedAt).toLocaleString('zh-CN') }}），
+          但项目当前排产规则 {{ project?.ruleVersion }} 不是其中被采纳的方案；可去「档位试算」页选中并采纳。
+        </p>
+        <div class="toolbar" style="margin-top: 8px">
+          <button class="btn" type="button" @click="exportTrialXlsx">试算对照表（Excel）</button>
+          <button class="btn" type="button" @click="exportTrialCsv">试算对照表（CSV）</button>
+          <RouterLink class="btn btn-sm" :to="`/trial/${project?.id}`">去档位试算</RouterLink>
+        </div>
       </div>
     </div>
 
@@ -368,6 +442,10 @@ const genderText = (gender: string): string => (gender === 'male' ? '男' : '女
           </div>
           <div class="print-meta">
             <div>录入 / 导出人：{{ store.operator || '—' }}</div>
+            <div v-if="trialSelected">
+              档位方案依据：试算采纳（身高步长 {{ trialSelected.params.heightStepCm }}cm / 起点 {{ trialSelected.params.heightAnchorCm }}cm /
+              胸围步长 {{ trialSelected.params.chestStepCm }}cm），{{ trialSelected.binCount }} 个号型档
+            </div>
             <div>守恒校验：{{ conservationText(summary) }}</div>
             <div>总录入：{{ summary.totals.totalRows }} 人</div>
             <div>有效人数：{{ summary.totals.validRows }} 人（无效 {{ summary.totals.invalidRows }} / 重复 {{ summary.totals.duplicateRows }}）</div>
