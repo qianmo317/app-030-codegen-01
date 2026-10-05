@@ -173,7 +173,10 @@ async function saveAsNew(): Promise<void> {
                   {{ projectsUsingRule(rule.version).length }} 个
                 </span>
               </td>
-              <td>{{ rule.builtin ? '内置' : '自定义' }}</td>
+              <td>
+                <span v-if="rule.version.startsWith('trial-')" class="badge badge-ok">试算采纳</span>
+                <span v-else>{{ rule.builtin ? '内置' : '自定义' }}</span>
+              </td>
             </tr>
           </tbody>
         </table>

@@ -3,11 +3,13 @@
  */
 
 const DB_NAME = 'app030-uniform-tally'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 export const STORE_PROJECTS = 'projects'
 export const STORE_RULES = 'rules'
 export const STORE_META = 'meta'
+/** 档位试算留档（每项目一份，重开页面仍在） */
+export const STORE_TRIALS = 'trials'
 
 export type MetaEntry = { key: string; value: string }
 
@@ -29,6 +31,8 @@ export function openDb(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(STORE_PROJECTS)) db.createObjectStore(STORE_PROJECTS, { keyPath: 'id' })
         if (!db.objectStoreNames.contains(STORE_RULES)) db.createObjectStore(STORE_RULES, { keyPath: 'version' })
         if (!db.objectStoreNames.contains(STORE_META)) db.createObjectStore(STORE_META, { keyPath: 'key' })
+        // v1 → v2：新增档位试算留档仓
+        if (!db.objectStoreNames.contains(STORE_TRIALS)) db.createObjectStore(STORE_TRIALS, { keyPath: 'projectId' })
       }
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => reject(request.error ?? new Error('IndexedDB 打开失败'))

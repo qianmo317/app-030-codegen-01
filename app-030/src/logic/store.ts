@@ -3,14 +3,24 @@
  * 数据只写在本机浏览器，没有任何服务端请求。
  */
 import { computed, reactive, toRaw } from 'vue'
-import type { Project, ProjectKind, SizeRule } from './types'
+import type { Project, ProjectKind, SizeRule, TrialAdoption, TrialParams } from './types'
 import { BUILTIN_RULES, DEFAULT_RULE_VERSION, ruleByVersion } from './sizeRules'
 import { runMerge } from './merge'
+import {
+  buildTrialRule,
+  buildTrialRuleLabel,
+  buildTrialVersion,
+  trialBaseFingerprint,
+  TRIAL_POLICY_TEXT,
+  type TrialArchive
+} from './trial'
 import {
   STORE_META,
   STORE_PROJECTS,
   STORE_RULES,
+  STORE_TRIALS,
   idbDelete,
+  idbGet,
   idbGetAll,
   idbPut,
   type MetaEntry
@@ -59,6 +69,10 @@ export async function initStore(): Promise<void> {
     if (missingBuiltin.length > 0) {
       for (const rule of missingBuiltin) await idbPut(STORE_RULES, rule)
     }
+    // 旧版本（v1 库）建的项目没有试算留痕字段，读入时补齐，避免页面各处判空
+    for (const project of projects) {
+      if (project.trialAdoption === undefined) project.trialAdoption = null
+    }
     store.projects = projects
     sortProjects()
     const operator = meta.find((entry) => entry.key === 'operator')
@@ -103,6 +117,7 @@ export async function createProject(input: {
     name: input.name.trim(),
     kind: input.kind,
     ruleVersion: input.ruleVersion || DEFAULT_RULE_VERSION,
+    trialAdoption: null,
     batches: input.batches.length > 0 ? input.batches : [],
     persons: [],
     imports: [],
@@ -159,7 +174,7 @@ export async function flushProject(project: Project): Promise<void> {
 
 export async function deleteProject(id: string): Promise<void> {
   store.projects = store.projects.filter((project) => project.id !== id)
-  await idbDelete(STORE_PROJECTS, id)
+  await Promise.all([idbDelete(STORE_PROJECTS, id), idbDelete(STORE_TRIALS, id)])
 }
 
 export async function saveRule(rule: SizeRule): Promise<void> {
@@ -182,4 +197,123 @@ export async function deleteRule(version: string): Promise<void> {
 export async function setOperator(name: string): Promise<void> {
   store.operator = name
   await idbPut<MetaEntry>(STORE_META, { key: 'operator', value: name })
+}
+
+/* ------------------------------- 档位方案试算 ------------------------------- */
+
+export async function getTrialArchive(projectId: string): Promise<TrialArchive | null> {
+  try {
+    const entry = await idbGet<TrialArchive>(STORE_TRIALS, projectId)
+    return entry ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 试算过程留档（每项目一份，重开页面还在）：只存最近一次试算的选项与全套对照表。
+ * 已采纳信息在重新试算时保留，旧对照表因此仍能标出「选中的那一套」。
+ */
+export async function saveTrialArchive(
+  project: Project,
+  draft: {
+    baseRuleVersion: string
+    options: TrialArchive['options']
+    schemes: TrialArchive['schemes']
+    recommendedKey: string | null
+    recommendReason: string
+    policyText: string
+    durationMs: number
+  }
+): Promise<TrialArchive> {
+  const previous = await getTrialArchive(project.id)
+  const now = Date.now()
+  const archive: TrialArchive = {
+    id: previous?.id ?? `trial_${now.toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+    projectId: project.id,
+    projectName: project.name,
+    createdAt: previous?.createdAt ?? now,
+    baseRuleVersion: draft.baseRuleVersion,
+    options: draft.options,
+    schemes: draft.schemes,
+    recommendedKey: draft.recommendedKey,
+    recommendReason: draft.recommendReason,
+    policyText: draft.policyText,
+    durationMs: draft.durationMs,
+    adoptedKey: previous?.adoptedKey ?? null,
+    adoptedAt: previous?.adoptedAt ?? null,
+    adoptedBy: previous?.adoptedBy ?? '',
+    adoptedRuleVersion: previous?.adoptedRuleVersion ?? null
+  }
+  await idbPut(STORE_TRIALS, archive)
+  return archive
+}
+
+export type AdoptionResult = { rule: SizeRule; adoption: TrialAdoption; archive: TrialArchive }
+
+/**
+ * 采纳选中的试算方案——这是唯一把试算参数写进规则内核的入口：
+ * 1) 以项目当前基准规则为底，只覆盖四个档位参数，落一条自定义 SizeRule；
+ * 2) 项目 ruleVersion 切到新版本并立即重算，随后页面 / 归并 / 导出全部读同一份结果；
+ * 3) 试算留档回写采纳标记，重新打开仍能看到选中的是哪套。
+ */
+export async function adoptTrialScheme(project: Project, scheme: TrialArchive['schemes'][number]): Promise<AdoptionResult> {
+  const baseRule = getRule(project.ruleVersion)
+  const params: TrialParams = { ...scheme.params }
+  const now = new Date()
+  const fingerprint = trialBaseFingerprint(baseRule)
+  // 同一基准规则 + 完全相同的四个参数，复用既有试算规则，避免规则库里堆出参数一致的 -2、-3
+  const reusable = store.rules.find(
+    (item) =>
+      !item.builtin &&
+      trialBaseFingerprint(item) === fingerprint &&
+      item.heightStepCm === params.heightStepCm &&
+      item.heightAnchor === params.heightAnchorCm &&
+      item.chestStepCm === params.chestStepCm &&
+      item.boundaryRule === params.boundaryRule
+  )
+  const version = reusable?.version ?? buildTrialVersion(params, store.rules.map((rule) => rule.version))
+  const rule: SizeRule =
+    reusable ?? {
+      ...buildTrialRule(baseRule, params),
+      version,
+      label: buildTrialRuleLabel(params, now),
+      builtin: false,
+      effectiveFrom: now.toISOString().slice(0, 10),
+      note: `由「${project.name}」档位试算采纳生成；基准规则 ${baseRule.version}；${TRIAL_POLICY_TEXT}`
+    }
+  if (!reusable) await saveRule(rule)
+
+  const previous = await getTrialArchive(project.id)
+  const adoption: TrialAdoption = {
+    trialId: previous?.id ?? '',
+    params,
+    ruleVersion: version,
+    ruleLabel: rule.label,
+    adoptedAt: now.getTime(),
+    by: store.operator,
+    policyText: TRIAL_POLICY_TEXT,
+    maxBuckets: previous?.options.maxBuckets ?? 0,
+    bucketCount: scheme.bucketCount,
+    totalStock: scheme.stockQty,
+    totalPriceFen: scheme.stockPriceFen
+  }
+  project.trialAdoption = adoption
+  project.ruleVersion = version
+  ensureMerged(project)
+  await flushProject(project)
+
+  if (previous) {
+    const archive: TrialArchive = {
+      ...previous,
+      adoptedKey: scheme.key,
+      adoptedAt: adoption.adoptedAt,
+      adoptedBy: adoption.by,
+      adoptedRuleVersion: version
+    }
+    await idbPut(STORE_TRIALS, archive)
+    return { rule, adoption, archive }
+  }
+  // 理论上不会发生：采纳前必须先跑过试算（留档已落盘）
+  throw new Error('未找到试算留档，无法采纳；请先运行一次档位试算')
 }

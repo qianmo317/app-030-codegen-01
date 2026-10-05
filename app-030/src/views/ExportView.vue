@@ -129,6 +129,9 @@ const genderText = (gender: string): string => (gender === 'male' ? '男' : '女
         <div class="sub">
           依据规则版本 <b>{{ project.ruleVersion }}</b>（{{ rule.label }}）｜ 总录入 {{ summary.totals.totalRows }} ｜
           有效 {{ summary.totals.validRows }} ｜ 总套数 {{ summary.totals.accountedQty }}
+          <template v-if="project.trialAdoption">
+            ｜ <span class="badge badge-ok">档位来自试算采纳：{{ project.trialAdoption.params.heightStepCm }}/{{ project.trialAdoption.params.heightAnchorCm }}/{{ project.trialAdoption.params.chestStepCm }}/{{ project.trialAdoption.params.boundaryRule === 'round_up' ? '归上' : '就近' }}</span>
+          </template>
         </div>
       </div>
     </div>
@@ -367,6 +370,7 @@ const genderText = (gender: string): string => (gender === 'male' ? '男' : '女
             项目：{{ project.name }} ｜ 号型规则版本：{{ rule.version }} ｜ 打印时间：{{ new Date().toLocaleString('zh-CN') }}
           </div>
           <div class="print-meta">
+            <div v-if="project.trialAdoption">档位方案：档位试算采纳（{{ project.trialAdoption.ruleVersion }}）</div>
             <div>录入 / 导出人：{{ store.operator || '—' }}</div>
             <div>守恒校验：{{ conservationText(summary) }}</div>
             <div>总录入：{{ summary.totals.totalRows }} 人</div>

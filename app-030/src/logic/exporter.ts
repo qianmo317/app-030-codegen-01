@@ -5,6 +5,13 @@
 import type { Gender, Person, Project, SizeRule, SummaryRow } from './types'
 import { specialFlagLabel } from './sizeRules'
 import { conservationText, type Summary } from './merge'
+import {
+  REGULAR_MARGIN_DEN,
+  REGULAR_MARGIN_NUM,
+  boundaryLabel,
+  formatPriceFen,
+  type TrialArchive
+} from './trial'
 import { chestWaistDiffCm, formatCm } from './precision'
 import type { Sheet } from './xlsx'
 
@@ -87,6 +94,14 @@ export function buildOrderSheet(ctx: ExportContext): OrderSheet {
     meta: [
       { label: '项目名称', value: project.name },
       { label: '号型规则版本', value: `${rule.version}（${rule.label}）` },
+      ...(project.trialAdoption
+        ? [
+            {
+              label: '档位方案出处',
+              value: `档位试算采纳于 ${new Date(project.trialAdoption.adoptedAt).toLocaleString('zh-CN')}（${project.trialAdoption.params.heightStepCm}/${project.trialAdoption.params.heightAnchorCm}/${project.trialAdoption.params.chestStepCm}/${boundaryLabel(project.trialAdoption.params.boundaryRule)}）`
+            }
+          ]
+        : []),
       { label: '生成时间', value: ctx.generatedAt.toLocaleString('zh-CN') },
       { label: '录入/导出人', value: ctx.operator || '—' },
       { label: '守恒校验', value: `${conservationText(summary)} → ${summary.conserved ? '通过' : '不通过'}` },
@@ -254,4 +269,67 @@ export function detailWorkbookSheets(ctx: BaseContext): Sheet[] {
     { name: '量体明细', rows: detailRows(ctx) },
     { name: '特殊体型清单', rows: specialRows(ctx) }
   ]
+}
+
+/* ------------------------------- 档位方案试算对照表 ------------------------------- */
+
+export const TRIAL_HEADER = [
+  '排名',
+  '标记',
+  '身高步长(cm)',
+  '身高起点(cm)',
+  '胸围步长(cm)',
+  '边界规则',
+  '号型档数(常规)',
+  '是否在上限内',
+  '常规人数',
+  '特殊单列(档/人)',
+  '未归进桶',
+  '最挤一档(人)',
+  '最空一档(人)',
+  '最挤-最空(人)',
+  '建议备货(套)',
+  '备货总价',
+  '每档人数明细'
+]
+
+/** 试算对照表 → 二维数组。页面表格与 CSV/Excel 导出共用，保证同一份结果 */
+export function trialCompareRows(archive: TrialArchive): (string | number)[][] {
+  const rows: (string | number)[][] = [
+    [`项目：${archive.projectName}`, `基准规则：${archive.baseRuleVersion}`, `试算时间：${new Date(archive.createdAt).toLocaleString('zh-CN')}`],
+    [
+      `工厂档数上限：${archive.options.maxBuckets}`,
+      `每套单价：¥${archive.options.unitPriceYuan}`,
+      `建议备货：常规 +${((REGULAR_MARGIN_NUM / REGULAR_MARGIN_DEN - 1) * 100).toFixed(0)}% / 特殊 +10%，向上取整且不少于 1 套`
+    ],
+    [`裁决口径：${archive.policyText}`],
+    [archive.recommendedKey ? `系统推荐：${archive.recommendReason}` : `无可推荐方案：${archive.recommendReason}`],
+    []
+  ]
+  rows.push(TRIAL_HEADER)
+  archive.schemes.forEach((scheme, index) => {
+    const marks: string[] = []
+    if (archive.adoptedKey === scheme.key) marks.push('已采纳')
+    if (archive.recommendedKey === scheme.key) marks.push('推荐')
+    rows.push([
+      index + 1,
+      marks.join('/'),
+      scheme.params.heightStepCm,
+      scheme.params.heightAnchorCm,
+      scheme.params.chestStepCm,
+      boundaryLabel(scheme.params.boundaryRule),
+      scheme.bucketCount,
+      scheme.fitsLimit ? '是' : '否（超上限）',
+      scheme.regularQty,
+      `${scheme.specialBucketCount}/${scheme.specialQty}`,
+      scheme.unresolvedQty,
+      scheme.busiestQty,
+      scheme.emptiestQty,
+      scheme.spread,
+      scheme.stockQty,
+      formatPriceFen(scheme.stockPriceFen),
+      scheme.buckets.map((bucket) => `${bucket.sizeCode}${bucket.gender === 'male' ? '男' : '女'}×${bucket.qty}`).join('；')
+    ])
+  })
+  return rows
 }

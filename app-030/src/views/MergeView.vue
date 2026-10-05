@@ -285,6 +285,22 @@ const rowLabel = (sizeCode: string, isSpecial: boolean): string =>
 
     <p v-if="message" class="notice notice-ok">{{ message }}</p>
 
+    <div v-if="project.trialAdoption" class="card card-accent-ok">
+      <div class="card-head">
+        <h3>本页按档位试算采纳的规则归并</h3>
+        <div class="spacer"></div>
+        <span class="badge badge-ok">采纳自档位试算 · {{ project.trialAdoption.ruleVersion }}</span>
+      </div>
+      <div class="card-body tight">
+        <p class="hint">
+          身高步长 {{ project.trialAdoption.params.heightStepCm }}cm、起点 {{ project.trialAdoption.params.heightAnchorCm }}cm、
+          胸围步长 {{ project.trialAdoption.params.chestStepCm }}cm、{{ project.trialAdoption.params.boundaryRule === 'round_up' ? '边界归上' : '就近归下' }}；
+          采纳 {{ project.trialAdoption.bucketCount }} 档 / 备货 {{ project.trialAdoption.totalStock }} 套。
+          页面、汇总与导出共用同一份规则内核结果，<RouterLink class="clickable" :to="`/trial/${project.id}`">回试算页可改选</RouterLink>。
+        </p>
+      </div>
+    </div>
+
     <div class="card" :class="summary.unmerged.length ? 'card-accent-danger' : 'card-accent-ok'">
       <div class="card-head">
         <h3>守恒校验（导出前置条件）</h3>

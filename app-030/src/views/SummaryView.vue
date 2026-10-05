@@ -63,6 +63,9 @@ function exportStockAdvice(): void {
       </div>
       <div class="spacer"></div>
       <div class="toolbar">
+        <RouterLink v-if="project.trialAdoption" class="btn btn-sm" :to="`/trial/${project.id}`">
+          档位试算（当前 {{ project.trialAdoption.bucketCount }} 档 · {{ project.trialAdoption.ruleVersion }}）
+        </RouterLink>
         <button class="btn btn-sm" type="button" @click="exportStockAdvice">导出分布与备货建议 CSV</button>
         <RouterLink class="btn btn-sm" :to="`/merge/${project.id}`">返回归并</RouterLink>
         <RouterLink class="btn btn-sm btn-primary" :to="`/export/${project.id}`">去导出</RouterLink>

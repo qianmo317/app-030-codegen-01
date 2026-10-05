@@ -104,12 +104,37 @@ export type ImportRecord = {
   skipped: number
 }
 
+/** 档位试算的可变参数（四项）；全部以 cm 表示，但只允许 0.5cm 的整数倍 */
+export type TrialParams = {
+  heightStepCm: number
+  heightAnchorCm: number
+  chestStepCm: number
+  boundaryRule: BoundaryRule
+}
+
+/** 采纳档位试算方案后写入项目的留痕：项目据此锁定试算生成的规则版本 */
+export type TrialAdoption = {
+  trialId: string
+  params: TrialParams
+  ruleVersion: string
+  ruleLabel: string
+  adoptedAt: number
+  by: string
+  policyText: string
+  maxBuckets: number
+  bucketCount: number
+  totalStock: number
+  totalPriceFen: number
+}
+
 export type Project = {
   id: string
   name: string
   kind: ProjectKind
   /** 项目锁定的规则版本：规则改版后旧项目仍按旧版本解释 */
   ruleVersion: string
+  /** 当前规则版本若来自档位试算，此处留痕（页面 / 归并 / 导出共同读取） */
+  trialAdoption: TrialAdoption | null
   batches: string[]
   persons: Person[]
   imports: ImportRecord[]
